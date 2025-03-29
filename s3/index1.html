@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Video Call</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f2f5;
+        }
+        #video-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        video {
+            width: 45%;
+            border-radius: 10px;
+            border: 2px solid #25d366;
+        }
+        #controls {
+            margin-top: 10px;
+        }
+        button {
+            padding: 10px;
+            margin: 5px;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        #startCall {
+            background-color: #25d366;
+            color: white;
+        }
+        #screenShare {
+            background-color: #ffa500;
+            color: white;
+        }
+        #record {
+            background-color: red;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>WhatsApp Video Call</h1>
+
+    <p id="timeMessage" style="color: red; font-weight: bold;"></p>
+
+    <div id="video-container">
+        <video id="localVideo" autoplay muted></video>
+        <video id="remoteVideo" autoplay></video>
+    </div>
+
+    <div id="controls">
+        <button id="startCall" onclick="startCall()" disabled>Start Video Call</button>
+        <button id="screenShare" onclick="shareScreen()">Share Screen</button>
+        <button id="record" onclick="toggleRecording()">Start Recording</button>
+    </div>
+
+    <p><strong>Meeting Link:</strong> <span id="meetingLink"></span></p>
+
+    <script>
+        let localStream;
+        let remoteStream;
+        let peerConnection;
+        let screenStream;
+        let mediaRecorder;
+        let recordedChunks = [];
+
+        const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+        function checkTimeRestriction() {
+            const now = new Date();
+            const hours = now.getHours();
+            const startCallButton = document.getElementById("startCall");
+
+            if (hours >= 18 && hours < 24) {
+                startCallButton.disabled = false;
+                document.getElementById("timeMessage").innerText = "You can start a video call now!";
+            } else {
+                startCallButton.disabled = true;
+                document.getElementById("timeMessage").innerText = "Video calls are only allowed between 6 PM - 12 AM.";
+            }
+        }
+
+        function startCall() {
+            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                .then(stream => {
+                    localStream = stream;
+                    document.getElementById("localVideo").srcObject = stream;
+
+                    peerConnection = new RTCPeerConnection(servers);
+                    remoteStream = new MediaStream();
+                    document.getElementById("remoteVideo").srcObject = remoteStream;
+
+                    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+                    peerConnection.ontrack = event => {
+                        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+                    };
+
+                    generateMeetingLink();
+                })
+                .catch(error => console.error("Error accessing media devices.", error));
+        }
+
+        function generateMeetingLink() {
+            const meetingID = Math.random().toString(36).substring(7);
+            const meetingURL = `${window.location.origin}/meeting/${meetingID}`;
+            document.getElementById("meetingLink").innerText = meetingURL;
+        }
+
+        function shareScreen() {
+            navigator.mediaDevices.getDisplayMedia({ video: true })
+                .then(screenStream => {
+                    let sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
+                    sender.replaceTrack(screenStream.getVideoTracks()[0]);
+
+                    screenStream.getVideoTracks()[0].onended = () => {
+                        sender.replaceTrack(localStream.getVideoTracks()[0]);
+                    };
+                })
+                .catch(error => console.error("Error sharing screen", error));
+        }
+
+        function toggleRecording() {
+            if (!mediaRecorder) {
+                let combinedStream = new MediaStream([
+                    ...localStream.getTracks(),
+                    ...remoteStream.getTracks()
+                ]);
+                mediaRecorder = new MediaRecorder(combinedStream);
+
+                mediaRecorder.ondataavailable = event => recordedChunks.push(event.data);
+
+                mediaRecorder.onstop = saveRecording;
+
+                mediaRecorder.start();
+                document.getElementById("record").innerText = "Stop Recording";
+            } else {
+                mediaRecorder.stop();
+                document.getElementById("record").innerText = "Start Recording";
+                mediaRecorder = null;
+            }
+        }
+
+        function saveRecording() {
+            let blob = new Blob(recordedChunks, { type: "video/webm" });
+            let url = URL.createObjectURL(blob);
+            let a = document.createElement("a");
+            a.href = url;
+            a.download = "video-call-recording.webm";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        checkTimeRestriction();
+    </script>
+
+</body>
+</html>
+
